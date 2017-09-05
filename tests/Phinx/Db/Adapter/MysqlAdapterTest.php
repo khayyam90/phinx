@@ -2,9 +2,14 @@
 
 namespace Test\Phinx\Db\Adapter;
 
-use Symfony\Component\Console\Input\ArrayInput;
-use Symfony\Component\Console\Output\NullOutput;
 use Phinx\Db\Adapter\MysqlAdapter;
+use Symfony\Component\Console\Input\ArrayInput;
+use Symfony\Component\Console\Input\InputDefinition;
+use Symfony\Component\Console\Input\InputOption;
+use Symfony\Component\Console\Output\BufferedOutput;
+use Symfony\Component\Console\Output\NullOutput;
+use Symfony\Component\Console\Output\StreamOutput;
+use Phinx\Db\Adapter\AdapterInterface;
 
 class MysqlAdapterTest extends \PHPUnit_Framework_TestCase
 {
@@ -302,6 +307,19 @@ class MysqlAdapterTest extends \PHPUnit_Framework_TestCase
         $this->assertTrue($this->adapter->hasTable('latin1_table'));
         $row = $this->adapter->fetchRow(sprintf("SHOW TABLE STATUS WHERE Name = '%s'", 'latin1_table'));
         $this->assertEquals('latin1_general_ci', $row['Collation']);
+    }
+
+    public function testCreateTableWithUnsignedPK()
+    {
+        $table = new \Phinx\Db\Table('ntable', array('signed' => false), $this->adapter);
+        $table->addColumn('realname', 'string')
+              ->addColumn('email', 'integer')
+              ->save();
+        $this->assertTrue($this->adapter->hasTable('ntable'));
+        $this->assertTrue($this->adapter->hasColumn('ntable', 'id'));
+        $this->assertTrue($this->adapter->hasColumn('ntable', 'realname'));
+        $this->assertTrue($this->adapter->hasColumn('ntable', 'email'));
+        $this->assertFalse($this->adapter->hasColumn('ntable', 'address'));
     }
 
     public function testRenameTable()
@@ -821,6 +839,23 @@ public function testRenameColumn()
         $this->assertTrue($this->adapter->hasForeignKey($table->getName(), array('ref_table_id')));
     }
 
+    public function testAddForeignKeyForTableWithUnsignedPK()
+    {
+        $refTable = new \Phinx\Db\Table('ref_table', array('signed' => false), $this->adapter);
+        $refTable->addColumn('field1', 'string')->save();
+
+        $table = new \Phinx\Db\Table('table', array(), $this->adapter);
+        $table->addColumn('ref_table_id', 'integer', array('signed' => false))->save();
+
+        $fk = new \Phinx\Db\Table\ForeignKey();
+        $fk->setReferencedTable($refTable)
+           ->setColumns(array('ref_table_id'))
+           ->setReferencedColumns(array('id'));
+
+        $this->adapter->addForeignKey($table, $fk);
+        $this->assertTrue($this->adapter->hasForeignKey($table->getName(), array('ref_table_id')));
+    }
+
     public function testDropForeignKey()
     {
         $refTable = new \Phinx\Db\Table('ref_table', array(), $this->adapter);
@@ -828,6 +863,24 @@ public function testRenameColumn()
 
         $table = new \Phinx\Db\Table('table', array(), $this->adapter);
         $table->addColumn('ref_table_id', 'integer')->save();
+
+        $fk = new \Phinx\Db\Table\ForeignKey();
+        $fk->setReferencedTable($refTable)
+           ->setColumns(array('ref_table_id'))
+           ->setReferencedColumns(array('id'));
+
+        $this->adapter->addForeignKey($table, $fk);
+        $this->adapter->dropForeignKey($table->getName(), array('ref_table_id'));
+        $this->assertFalse($this->adapter->hasForeignKey($table->getName(), array('ref_table_id')));
+    }
+
+    public function testDropForeignKeyForTableWithUnsignedPK()
+    {
+        $refTable = new \Phinx\Db\Table('ref_table', array('signed' => false), $this->adapter);
+        $refTable->addColumn('field1', 'string')->save();
+
+        $table = new \Phinx\Db\Table('table', array(), $this->adapter);
+        $table->addColumn('ref_table_id', 'integer', array('signed' => false))->save();
 
         $fk = new \Phinx\Db\Table\ForeignKey();
         $fk->setReferencedTable($refTable)
@@ -875,6 +928,24 @@ public function testRenameColumn()
         $this->assertFalse($this->adapter->hasForeignKey($table->getName(), array('ref_table_id2')));
     }
 
+    public function testHasForeignKeyForTableWithUnsignedPK()
+    {
+        $refTable = new \Phinx\Db\Table('ref_table', array('signed' => false), $this->adapter);
+        $refTable->addColumn('field1', 'string')->save();
+
+        $table = new \Phinx\Db\Table('table', array(), $this->adapter);
+        $table->addColumn('ref_table_id', 'integer', array('signed' => false))->save();
+
+        $fk = new \Phinx\Db\Table\ForeignKey();
+        $fk->setReferencedTable($refTable)
+           ->setColumns(array('ref_table_id'))
+           ->setReferencedColumns(array('id'));
+
+        $this->adapter->addForeignKey($table, $fk);
+        $this->assertTrue($this->adapter->hasForeignKey($table->getName(), array('ref_table_id')));
+        $this->assertFalse($this->adapter->hasForeignKey($table->getName(), array('ref_table_id2')));
+    }
+
     public function testHasForeignKeyAsString()
     {
         $refTable = new \Phinx\Db\Table('ref_table', array(), $this->adapter);
@@ -900,6 +971,25 @@ public function testRenameColumn()
 
         $table = new \Phinx\Db\Table('table', array(), $this->adapter);
         $table->addColumn('ref_table_id', 'integer')->save();
+
+        $fk = new \Phinx\Db\Table\ForeignKey();
+        $fk->setReferencedTable($refTable)
+           ->setColumns(array('ref_table_id'))
+           ->setConstraint("my_constraint")
+           ->setReferencedColumns(array('id'));
+
+        $this->adapter->addForeignKey($table, $fk);
+        $this->assertTrue($this->adapter->hasForeignKey($table->getName(), array('ref_table_id'), 'my_constraint'));
+        $this->assertFalse($this->adapter->hasForeignKey($table->getName(), array('ref_table_id'), 'my_constraint2'));
+    }
+
+    public function testHasForeignKeyWithConstraintForTableWithUnsignedPK()
+    {
+        $refTable = new \Phinx\Db\Table('ref_table', array('signed' => false), $this->adapter);
+        $refTable->addColumn('field1', 'string')->save();
+
+        $table = new \Phinx\Db\Table('table', array(), $this->adapter);
+        $table->addColumn('ref_table_id', 'integer', array('signed' => false))->save();
 
         $fk = new \Phinx\Db\Table\ForeignKey();
         $fk->setReferencedTable($refTable)
@@ -973,6 +1063,21 @@ public function testRenameColumn()
         $this->assertEquals("enum('one','two')", $rows[1]['Type']);
     }
 
+    public function testEnumColumnValuesFilledUpFromSchema()
+    {
+        // Creating column with values
+        (new \Phinx\Db\Table('table1', array(), $this->adapter))
+            ->addColumn('enum_column', 'enum', array('values' => array('one', 'two')))
+            ->save();
+
+        // Reading them back
+        $table = new \Phinx\Db\Table('table1', array(), $this->adapter);
+        $columns = $table->getColumns();
+        $enumColumn = end($columns);
+        $this->assertEquals(AdapterInterface::PHINX_TYPE_ENUM, $enumColumn->getType());
+        $this->assertEquals(array('one', 'two'), $enumColumn->getValues());
+    }
+
     public function testHasColumn()
     {
         $table = new \Phinx\Db\Table('table1', array(), $this->adapter);
@@ -991,6 +1096,42 @@ public function testRenameColumn()
 
         $this->assertFalse($tableQuoted->hasColumn('column2'));
         $this->assertTrue($tableQuoted->hasColumn('value'));
+    }
+
+    public function testBulkInsertData()
+    {
+        $data = array(
+            array(
+                'column1' => 'value1',
+                'column2' => 1,
+            ),
+            array(
+                'column1' => 'value2',
+                'column2' => 2,
+            ),
+            array(
+                'column1' => 'value3',
+                'column2' => 3,
+            )
+        );
+        $table = new \Phinx\Db\Table('table1', array(), $this->adapter);
+        $table->addColumn('column1', 'string')
+            ->addColumn('column2', 'integer')
+            ->addColumn('column3', 'string', array('default' => 'test'))
+            ->insert($data);
+        $this->adapter->createTable($table);
+        $this->adapter->bulkinsert($table, $table->getData());
+        $table->reset();
+
+        $rows = $this->adapter->fetchAll('SELECT * FROM table1');
+        $this->assertEquals('value1', $rows[0]['column1']);
+        $this->assertEquals('value2', $rows[1]['column1']);
+        $this->assertEquals('value3', $rows[2]['column1']);
+        $this->assertEquals(1, $rows[0]['column2']);
+        $this->assertEquals(2, $rows[1]['column2']);
+        $this->assertEquals(3, $rows[2]['column2']);
+        $this->assertEquals('test', $rows[0]['column3']);
+        $this->assertEquals('test', $rows[2]['column3']);
     }
 
     public function testInsertData()
@@ -1026,5 +1167,27 @@ public function testRenameColumn()
         $this->assertEquals(3, $rows[2]['column2']);
         $this->assertEquals('test', $rows[0]['column3']);
         $this->assertEquals('foo', $rows[2]['column3']);
+    }
+
+    public function testDumpCreateTable()
+    {
+        $inputDefinition = new InputDefinition([new InputOption('dry-run')]);
+        $this->adapter->setInput(new ArrayInput(['--dry-run' => true], $inputDefinition));
+
+        $consoleOutput = new BufferedOutput();
+        $this->adapter->setOutput($consoleOutput);
+
+        $table = new \Phinx\Db\Table('table1', array(), $this->adapter);
+
+        $table->addColumn('column1', 'string')
+            ->addColumn('column2', 'integer')
+            ->addColumn('column3', 'string', array('default' => 'test'))
+            ->save();
+
+        $expectedOutput = <<<'OUTPUT'
+CREATE TABLE `table1` (`id` INT(11) NOT NULL AUTO_INCREMENT, `column1` VARCHAR(255) NOT NULL, `column2` INT(11) NOT NULL, `column3` VARCHAR(255) NOT NULL DEFAULT 'test', PRIMARY KEY (`id`)) ENGINE = InnoDB CHARACTER SET utf8 COLLATE utf8_general_ci;
+OUTPUT;
+        $actualOutput = $consoleOutput->fetch();
+        $this->assertContains($expectedOutput, $actualOutput, 'Passing the --dry-run option does not dump create table query to the output');
     }
 }
